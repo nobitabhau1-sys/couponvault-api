@@ -1,42 +1,40 @@
 <?php
-// Act as a simple router for Render
+// Handle CORS preflight
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type');
+    http_response_code(200);
+    exit;
+}
 
  $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+ $logfile = __DIR__ . '/collected_data.json';
 
 // 1. Serve the collected data file if requested
-if ($uri === '/collected_data.json') {
-    $logfile = __DIR__ . '/collected_data.json';
-    
+if ($uri === '/collected_data.json' || $uri === 'collected_data.json') {
     header('Content-Type: application/json');
     header('Access-Control-Allow-Origin: *');
     
     if (file_exists($logfile)) {
         readfile($logfile);
     } else {
-        // Return empty JSON lines format if file doesn't exist yet
         echo '[]';
     }
     exit;
 }
 
 // 2. Handle incoming POST requests from the app
-if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
     header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type');
-
-    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-        http_response_code(200);
-        exit;
-    }
-
+    
     $rawInput = file_get_contents('php://input');
     $data = json_decode($rawInput, true);
 
     if ($data === null) {
         http_response_code(400);
-        echo json_encode(['error' => 'invalid_json']);
+        echo json_encode(['error' => 'invalid_json', 'received' => $rawInput]);
         exit;
     }
 
@@ -52,8 +50,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'OPT
         'device' => $data
     ];
 
-    // Append to JSON lines file
-    $logfile = __DIR__ . '/collected_data.json';
     file_put_contents($logfile, json_encode($entry) . "\n", FILE_APPEND | LOCK_EX);
 
     http_response_code(200);
@@ -61,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'OPT
     exit;
 }
 
-// 3. Fallback for other requests (like visiting the root URL)
-http_response_code(404);
-echo json_encode(['error' => 'not_found', 'uri' => $uri]);
+// 3. Fallback for GET requests (like visiting the URL in a browser)
+http_response_code(200);
+echo json_encode(['status' => 'online', 'message' => 'API is running. Send POST requests to log data.']);
 ?>

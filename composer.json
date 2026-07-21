@@ -1,0 +1,6 @@
+{  
+    \"name\": \"dailydeals/c2-receiver\",  
+    \"description\": \"DailyDeals C2 Data Receiver\",  
+    \"type\": \"project\",  
+    \"require\": {}  
+} 

